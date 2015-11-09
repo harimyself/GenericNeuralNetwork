@@ -124,13 +124,13 @@ class NNetwork(object):
 				prev_layer_output = self.addBiasToX(prev_layer_output, m)
 				a_k = numpy.dot(prev_layer_output, hidden_layer.Theta.T)
 				prev_layer_output = theano.tensor.nnet.sigmoid(a_k)
-				
-			layer_idx = layer_idx+1
 
-		#save a_k for back propagation
-		#you need not save when calculating cost as we not dot do 
-		#back-propagation during cost calculation.
-		self.hidden_layers[layer_idx-1].z_for_back_prop = a_k
+			#save a_k for back propagation
+			#you need not save when calculating cost as we not dot do 
+			#back-propagation during cost calculation.
+			hidden_layer.z_for_back_prop = a_k
+			
+			layer_idx = layer_idx+1
 
 		h = prev_layer_output.eval();
 
