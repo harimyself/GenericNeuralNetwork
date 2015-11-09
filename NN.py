@@ -12,6 +12,7 @@ class HiddenLayer(object):
 			self.Theta = self.initializeWeights(output_size, input_size+1)
 		else:
 			self.Theta = Theta
+		self.z_for_back_prop = None
 
 
 	def initializeWeights(self, input_size,output_size):
@@ -63,7 +64,7 @@ class NNetwork(object):
 	def calculateCost(self, X_input, y_vec):
 		m = X_input.shape[0]
 		
-		h = self.propagateForward(X_input, y_vec, m)
+		h = self.propagateForwardForCost(X_input, y_vec, m)
 		
 		#Calculate cost
 		#(1/m) * sum(sum((-yVec' .* log(h)) - ((1-yVec)' .* log(1 - h))));
@@ -86,13 +87,12 @@ class NNetwork(object):
 
 	#this function will add add bias using as a first column
 	def addBiasToX(self, X, m):
-		print(X.shape)
 		result = numpy.append(numpy.ones((m, 1)), X, axis=1)
 		return result
 
-	def propagateForward(self, X_input, y_vec, m):
+	def propagateForwardForCost(self, X_input, y_vec, m):
 		#x_mat  = T.matrix('x_mat')
-#
+		#print(X_input.shape, y_vec.shape)
 		layer_idx=0
 		prev_layer_output=None
 		for hidden_layer in self.hidden_layers:
@@ -100,27 +100,51 @@ class NNetwork(object):
 				z_k = T.dot(X_input, hidden_layer.Theta.T)
 				prev_layer_output = theano.tensor.nnet.sigmoid(z_k)
 			else:
-				prev_layer_output = self.addBiasToX(prev_layer_output.eval(), m)
+				prev_layer_output = prev_layer_output.eval()
+				prev_layer_output = self.addBiasToX(prev_layer_output, m)
 				prev_layer_output = T.dot(prev_layer_output, hidden_layer.Theta.T)
 				prev_layer_output = theano.tensor.nnet.sigmoid(prev_layer_output)
 				
 			layer_idx = layer_idx+1
 		h = prev_layer_output.eval();
+
 		return h
-		'''
-		layer_idx = 0;
-		prev_layer_output = None
+		
+	def propagateForward(self, X_input, y_vec, m):
+		
+		layer_idx=0
+		prev_layer_output=None
+		a_k = None
 		for hidden_layer in self.hidden_layers:
 			if layer_idx==0:
-				prev_layer_output = hidden_layer.process(X.loc[train_idx])
+				a_k = T.dot(X_input, hidden_layer.Theta.T)
+				prev_layer_output = theano.tensor.nnet.sigmoid(a_k)
 			else:
-				prev_layer_output = hidden_layer.process(prev_layer_output)
+				prev_layer_output = prev_layer_output.eval()
+				prev_layer_output = self.addBiasToX(prev_layer_output, m)
+				a_k = numpy.dot(prev_layer_output, hidden_layer.Theta.T)
+				prev_layer_output = theano.tensor.nnet.sigmoid(a_k)
+				
 			layer_idx = layer_idx+1
 
-		return prev_layer_output
-		'''
-	def propagateBack():
-		
+		#save a_k for back propagation
+		#you need not save when calculating cost as we not dot do 
+		#back-propagation during cost calculation.
+		self.hidden_layers[layer_idx-1].z_for_back_prop = a_k
+
+		h = prev_layer_output.eval();
+
+		return h
+
+	def propagateBack(self, delta_final_layer):
+		#delta_2 = (Theta2' * delta_3) .* sigmoidGradient([1; z_2]);
+		idx = 0
+		for hidden_layer in reversed(self.hidden_layers):
+			if hidden_layer.z_for_back_prop is not None:
+				print(hidden_layer.z_for_back_prop.shape)
+			if idx == 0:
+				res = T.dot(hidden_layer.Theta.T, delta_final_layer) * theano.tensor.nnet.sigmoid(self.addBiasToX(hidden_layer.z_for_back_prop))
+			idx = idx+1
 		return None
 
 	def ignite(self, X, y_vec):
@@ -129,6 +153,18 @@ class NNetwork(object):
 
 		cost = self.calculateCost(X, y_vec)
 		print('calculated cost is: ', cost)
+		
+		X_col_length = X.shape[1]
+		y_row_length = y_vec.shape[0]
 		for data_idx in range(0, m):
-			print(data_idx)
-			result = self.propagateForward(X[data_idx,:], y_vec[:,data_idx], 1)
+			#print(numpy.matrix(X[data_idx,:]).shape, numpy.matrix(y_vec[:,data_idx]).T.shape)
+			#print(type(numpy.matrix(X[data_idx,:])))
+			#print(type(numpy.matrix(y_vec[:,data_idx]).T))
+			X_one_rec = numpy.reshape(X[data_idx,:], (1, X_col_length))
+			y_one_rec = numpy.reshape(y_vec[:,data_idx], (y_row_length,1))
+			a_3 = self.propagateForward(X_one_rec, y_one_rec, 1)
+			
+			#Calculate error at final layer
+			delta_3 = a_3 - y_one_rec
+			print(delta_3)
+			#self.propagateBack(delta_3)
