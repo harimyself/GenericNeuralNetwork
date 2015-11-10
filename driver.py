@@ -24,12 +24,12 @@ def create_y_vec(y, classes):
 def drive(input_layer_size, hidden_layer_size, classes, is_local):
 	
 	X, y = load_data('../data/train_sample.csv', is_local, need_split=False)
-
+	
 	y_vec = create_y_vec(y, classes)
+	lambda_val = 0.1
 	#print(y_vec)
 	network = NNetwork(input_layer_size, hidden_layer_size, 1, classes)
-	network.ignite(X, y_vec)
-
+	network.ignite(X, y_vec, lambda_val)
 
 if __name__ == '__main__':
 	input_layer_size = 784
