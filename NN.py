@@ -13,6 +13,9 @@ class HiddenLayer(object):
 		else:
 			self.Theta = Theta
 		self.z_for_back_prop = None
+		self.a_for_back_prop = None
+		
+		self.Theta_grad = numpy.zeros(self.Theta.shape)
 
 
 	def initializeWeights(self, input_size,output_size):
@@ -61,7 +64,7 @@ class NNetwork(object):
 				layers.append(HiddenLayer(hidden_layer_size, hidden_layer_size, None))
 		return layers
 
-	def calculateCost(self, X_input, y_vec):
+	def calculateCost(self, X_input, y_vec, lambda_val):
 		m = X_input.shape[0]
 		
 		h = self.propagateForwardForCost(X_input, y_vec, m)
@@ -77,7 +80,6 @@ class NNetwork(object):
 			Theta_with_out_bias = numpy.delete(hidden_layer.Theta, 0, 1)
 			reg_term_sum = reg_term_sum + T.sum(T.sum(numpy.square(Theta_with_out_bias))).eval()
 
-		lambda_val = 0.1
 		J_Reg_Val = (lambda_val * reg_term_sum)/(2*m);
 
 		J = J+J_Reg_Val;
@@ -90,9 +92,11 @@ class NNetwork(object):
 		result = numpy.append(numpy.ones((m, 1)), X, axis=1)
 		return result
 
+	def removeBias(self, X):
+		X = X[:,1:]
+		return X
+
 	def propagateForwardForCost(self, X_input, y_vec, m):
-		#x_mat  = T.matrix('x_mat')
-		#print(X_input.shape, y_vec.shape)
 		layer_idx=0
 		prev_layer_output=None
 		for hidden_layer in self.hidden_layers:
@@ -117,54 +121,96 @@ class NNetwork(object):
 		a_k = None
 		for hidden_layer in self.hidden_layers:
 			if layer_idx==0:
-				a_k = T.dot(X_input, hidden_layer.Theta.T)
-				prev_layer_output = theano.tensor.nnet.sigmoid(a_k)
+				z_k = numpy.dot(hidden_layer.Theta, X_input)
+				prev_layer_output = theano.tensor.nnet.sigmoid(z_k)
 			else:
 				prev_layer_output = prev_layer_output.eval()
-				prev_layer_output = self.addBiasToX(prev_layer_output, m)
-				a_k = numpy.dot(prev_layer_output, hidden_layer.Theta.T)
-				prev_layer_output = theano.tensor.nnet.sigmoid(a_k)
+				#Add bias unit
+				prev_layer_output = numpy.append(numpy.ones((m, 1)), prev_layer_output, axis=0)
+				#save a_k for back propagation
+				self.hidden_layers[layer_idx-1].a_for_back_prop = prev_layer_output
+				
+				#prev_layer_output = self.addBiasToX(prev_layer_output, m)
+				z_k = numpy.dot(hidden_layer.Theta, prev_layer_output)
+				
+				prev_layer_output = theano.tensor.nnet.sigmoid(z_k)
 
-			#save a_k for back propagation
+			
 			#you need not save when calculating cost as we not dot do 
 			#back-propagation during cost calculation.
-			hidden_layer.z_for_back_prop = a_k
+			hidden_layer.z_for_back_prop = z_k
 			
 			layer_idx = layer_idx+1
 
 		h = prev_layer_output.eval();
+		self.hidden_layers[layer_idx-1].a_for_back_prop = h
 
 		return h
 
-	def propagateBack(self, delta_final_layer):
-		#delta_2 = (Theta2' * delta_3) .* sigmoidGradient([1; z_2]);
+	def propagateBack(self, a_1, delta_final_layer):
 		idx = 0
-		for hidden_layer in reversed(self.hidden_layers):
-			if hidden_layer.z_for_back_prop is not None:
-				print(hidden_layer.z_for_back_prop.shape)
+		delta_prev = delta_final_layer
+		dt = None
+		#skip last layer as as delta(error) at final layer is already calcualted
+		for hidden_layer_idx in range(len(self.hidden_layers)-1, -1, -1):
+			hidden_layer = self.hidden_layers[hidden_layer_idx]
+
 			if idx == 0:
-				res = T.dot(hidden_layer.Theta.T, delta_final_layer) * theano.tensor.nnet.sigmoid(self.addBiasToX(hidden_layer.z_for_back_prop))
+				#print(delta_prev.shape,  self.hidden_layers[hidden_layer_idx-1].a_for_back_prop.shape)
+				dt = numpy.dot(delta_prev, self.hidden_layers[hidden_layer_idx-1].a_for_back_prop.T)
+			else:
+				z_with_bias = numpy.append(numpy.ones((1, 1)), hidden_layer.z_for_back_prop, axis=0)
+				
+				delta_prev = T.dot(self.hidden_layers[hidden_layer_idx+1].Theta.T, delta_prev) * self.sigmoidGradient(z_with_bias)
+		
+				delta_prev = delta_prev.eval()
+				#remove bias
+				delta_prev = delta_prev[1:,:]
+				
+				#We need to calculate error at first layer using input layer(i.e a_1)
+				if hidden_layer_idx == 0:
+					dt = numpy.dot(delta_prev, a_1.T)
+				else:
+					#This block need to be tested for more than one hidden layer.
+					dt = numpy.dot(delta_prev, hidden_layer.a_for_back_prop.T)
+					#dt = numpy.dot(delta_prev, self.hidden_layers[hidden_layer_idx-1].a_for_back_prop.T)
+			
+			hidden_layer.Theta_grad = hidden_layer.Theta_grad + dt
 			idx = idx+1
 		return None
-
-	def ignite(self, X, y_vec):
+	
+	def mean_and_regularize_theta(self, m, lambda_val):
+		for hidden_layer in self.hidden_layers:
+			hidden_layer.Theta_grad = hidden_layer.Theta_grad/m
+			print(hidden_layer.Theta_grad.shape)
+			hidden_layer.Theta_grad[:,1:] = hidden_layer.Theta_grad[:,1:] + lambda_val * (hidden_layer.Theta[:,1:]/m)
+			print(hidden_layer.Theta_grad.shape)
+			
+		
+		
+	def sigmoidGradient(self, val):
+		sig_val = theano.tensor.nnet.sigmoid(val)
+		sgd = sig_val * (1-sig_val)
+		return sgd.eval()
+	
+	def ignite(self, X, y_vec, lambda_val):
 		m = X.shape[0]
 		X = self.addBiasToX(X, m)
-
-		cost = self.calculateCost(X, y_vec)
+		
+		cost = self.calculateCost(X, y_vec, lambda_val)
 		print('calculated cost is: ', cost)
 		
 		X_col_length = X.shape[1]
 		y_row_length = y_vec.shape[0]
 		for data_idx in range(0, m):
-			#print(numpy.matrix(X[data_idx,:]).shape, numpy.matrix(y_vec[:,data_idx]).T.shape)
-			#print(type(numpy.matrix(X[data_idx,:])))
-			#print(type(numpy.matrix(y_vec[:,data_idx]).T))
-			X_one_rec = numpy.reshape(X[data_idx,:], (1, X_col_length))
+			X_one_rec = numpy.reshape(X[data_idx,:], (X_col_length, 1))
 			y_one_rec = numpy.reshape(y_vec[:,data_idx], (y_row_length,1))
-			a_3 = self.propagateForward(X_one_rec, y_one_rec, 1)
+			a_final = self.propagateForward(X_one_rec, y_one_rec, 1)
 			
 			#Calculate error at final layer
-			delta_3 = a_3 - y_one_rec
-			print(delta_3)
-			#self.propagateBack(delta_3)
+			delta_final_layer = a_final - y_one_rec
+			
+			self.propagateBack(X_one_rec, delta_final_layer)
+			
+			self.mean_and_regularize_theta(m, lambda_val)
+			
