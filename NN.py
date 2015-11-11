@@ -64,8 +64,12 @@ class NNetwork(object):
 				layers.append(HiddenLayer(hidden_layer_size, hidden_layer_size, None))
 		return layers
 
-	def calculateCost(self, X_input, y_vec, lambda_val):
-		m = X_input.shape[0]
+	def calculateCost(self, nnet_weights, *args):
+		X_input, y_vec, lambda_val, m = args
+		
+		print('Calling cost function...')
+		#initialize weights fed by optimize function
+		self.init_nnet_weights(nnet_weights)
 		
 		h = self.propagateForwardForCost(X_input, y_vec, m)
 		
@@ -83,8 +87,7 @@ class NNetwork(object):
 		J_Reg_Val = (lambda_val * reg_term_sum)/(2*m);
 
 		J = J+J_Reg_Val;
-		print('cost function - forward propagation completed...')
-		
+		print('cost calculated: ', J)
 		return J
 
 	#this function will add add bias using as a first column
@@ -182,35 +185,78 @@ class NNetwork(object):
 	def mean_and_regularize_theta(self, m, lambda_val):
 		for hidden_layer in self.hidden_layers:
 			hidden_layer.Theta_grad = hidden_layer.Theta_grad/m
-			print(hidden_layer.Theta_grad.shape)
 			hidden_layer.Theta_grad[:,1:] = hidden_layer.Theta_grad[:,1:] + lambda_val * (hidden_layer.Theta[:,1:]/m)
-			print(hidden_layer.Theta_grad.shape)
+
+	
+	def roll_theta(self):
+		theta_list = []
+		for hidden_layer in self.hidden_layers:
+			theta_list.append(hidden_layer.Theta.flatten())
 			
+		theta_rolled = numpy.concatenate(theta_list)
+		return theta_rolled
+					
+	def roll_theta_grad(self):
+		theta_list = []
+		for hidden_layer in self.hidden_layers:
+			theta_list.append(hidden_layer.Theta_grad.flatten())
 		
-		
+		theta_rolled = numpy.concatenate(theta_list)
+		return theta_rolled
+
 	def sigmoidGradient(self, val):
 		sig_val = theano.tensor.nnet.sigmoid(val)
 		sgd = sig_val * (1-sig_val)
 		return sgd.eval()
 	
-	def ignite(self, X, y_vec, lambda_val):
-		m = X.shape[0]
-		X = self.addBiasToX(X, m)
-		
-		cost = self.calculateCost(X, y_vec, lambda_val)
-		print('calculated cost is: ', cost)
+	def init_nnet_weights(self, nnet_wights):
+		idx = 0
+		data_idx = 0
+		for hidden_layer in self.hidden_layers:
+		#for layer in range(1, self.no_of_hidden_layes + 2):
+			process_len = 0
+			#input/first layer
+			if idx==0:
+				process_len = self.hidden_layer_size * (self.input_layer_size+1)
+				temp = nnet_wights[data_idx:(data_idx+process_len)]
+				hidden_layer.Theta = numpy.reshape(temp, (self.hidden_layer_size, self.input_layer_size+1))
+			#output/last layer
+			elif idx == self.no_of_hidden_layes:
+				process_len = self.classes * (self.hidden_layer_size+1)
+				temp = nnet_wights[data_idx:(data_idx+process_len)]
+				hidden_layer.Theta = numpy.reshape(temp, (self.classes, self.hidden_layer_size+1))
+			else:
+				process_len = self.hidden_layer_size * (self.hidden_layer_size+1)
+				temp = nnet_wights[data_idx:(data_idx+process_len)]
+				hidden_layer.Theta = numpy.reshape(temp, (self.hidden_layer_size, self.hidden_layer_size+1))
+			
+			data_idx = data_idx + process_len
+			
+			idx = idx + 1
+
+	def calculate_gradient(self, nnet_weights, *args):
+		X, y_vec, lambda_val, m = args
+
+		print('calling gradient function...')
+		#initialize weights fed by optimize function
+		self.init_nnet_weights(nnet_weights)
 		
 		X_col_length = X.shape[1]
 		y_row_length = y_vec.shape[0]
+	
+		theta_grad_rolled = None
 		for data_idx in range(0, m):
 			X_one_rec = numpy.reshape(X[data_idx,:], (X_col_length, 1))
 			y_one_rec = numpy.reshape(y_vec[:,data_idx], (y_row_length,1))
 			a_final = self.propagateForward(X_one_rec, y_one_rec, 1)
-			
+		
 			#Calculate error at final layer
 			delta_final_layer = a_final - y_one_rec
-			
+		
 			self.propagateBack(X_one_rec, delta_final_layer)
-			
-			self.mean_and_regularize_theta(m, lambda_val)
-			
+
+	
+		self.mean_and_regularize_theta(m, lambda_val)
+		theta_grad_rolled = self.roll_theta_grad()
+		
+		return theta_grad_rolled
